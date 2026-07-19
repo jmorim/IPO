@@ -1,0 +1,48 @@
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+name: R-CMD-check
+
+jobs:
+  R-CMD-check:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnetcdf-dev libcurl4-openssl-dev libssl-dev libxml2-dev
+
+      - name: Install BiocManager
+        run: install.packages("BiocManager")
+        shell: Rscript {0}
+
+      - name: Install package dependencies
+        run: |
+          BiocManager::install(
+            c("xcms", "CAMERA", "rsm", "BiocParallel", "MsExperiment", "MSnbase",
+              "msdata", "mtbls2", "faahKO", "RUnit", "BiocGenerics", "knitr",
+              "rmarkdown", "rcmdcheck"),
+            update = TRUE, ask = FALSE
+          )
+        shell: Rscript {0}
+
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          args: 'c("--no-manual", "--timings")'
+          build_args: 'character()'
+          error-on: '"error"'

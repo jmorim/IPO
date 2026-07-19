@@ -28,7 +28,8 @@ checkRetGroupSetParams <- function(params) {
 
 getDefaultRetCorCenterSample <- function(xset) {
   ret <- NULL
-  for(i in 1:length(filepaths(xset))) {
+  n_files <- length(fileNames_IPO(xset))
+  for(i in 1:n_files) {
     ret <- c(ret, sum(peaks_IPO(xset)[,"sample"] == i))
   }
   return(which.max(ret))
@@ -137,22 +138,27 @@ getRGTVValues <- function(xset, exp_index=1, retcor_penalty=1) {
 
   relative_rt_diff <- c()
   
-  if(nrow(xcms::groups(xset)) > 0) {
-    for(i in 1:nrow(xcms::groups(xset))) {
-      feature_rtmed <- xcms::groups(xset)[i, "rtmed"]
+  feature_defs <- groups_IPO(xset)
+  peak_source <- peaks_IPO(xset)
+  peak_idx <- groupidx_IPO(xset)
+  n_files <- length(fileNames_IPO(xset))
+  
+  if(nrow(feature_defs) > 0) {
+    for(i in 1:nrow(feature_defs)) {
+      feature_rtmed <- feature_defs[i, "rtmed"]
 	    relative_rt_diff <- 
 	      c(relative_rt_diff, 
 	        mean(abs(feature_rtmed - 
-	                   peaks_IPO(xset)[groupidx(xset)[[i]], "rt"]) / feature_rtmed))
+	                   peak_source[peak_idx[[i]], "rt"]) / feature_rtmed))
     }
     good_groups <- 
-      sum(unlist(lapply(X=groupidx(xset), FUN = function(x, xset) {
-        ifelse(length(unique(peaks_IPO(xset)[x,"sample"])) == 
-                 length(filepaths(xset)) & 
-                 length(peaks_IPO(xset)[x,"sample"]) == 
-                 length(filepaths(xset)), 1, 0)
-      }, xset)))
-    bad_groups <- nrow(xcms::groups(xset)) - good_groups
+      sum(unlist(lapply(X=peak_idx, FUN = function(x, peak_source, n_files) {
+        ifelse(length(unique(peak_source[x,"sample"])) == 
+                 n_files & 
+                 length(peak_source[x,"sample"]) == 
+                 n_files, 1, 0)
+      }, peak_source, n_files)))
+    bad_groups <- nrow(feature_defs) - good_groups
   } else {
     relative_rt_diff <- 1
     good_groups <- 0
@@ -467,27 +473,32 @@ retcorGroup <- function(xset, parameters, exp_index=1) {
   
   retcor_failed = ifelse(do_retcor, 1.1, 1) 
   
+  sample_groups <- rep(1L, length(fileNames_IPO(xset)))
+  
   if(parameters$retcorMethod[exp_index] == "loess") {
     try(
-      xset <- xcms::group(
-        xset, 
-        method  = "density", 
-        bw      = parameters$bw[exp_index], 
-        mzwid   = parameters$mzwid[exp_index], 
-        minfrac = parameters$minfrac[exp_index], 
-        minsamp = parameters$minsamp[exp_index], 
-        max     = parameters$max[exp_index])
+      xset <- xcms::groupChromPeaks(
+        xset,
+        param = xcms::PeakDensityParam(
+          sampleGroups = sample_groups,
+          bw          = parameters$bw[exp_index],
+          binSize     = parameters$mzwid[exp_index],
+          minFraction = parameters$minfrac[exp_index],
+          minSamples  = parameters$minsamp[exp_index],
+          maxFeatures = parameters$max[exp_index])
+        )
       )
     
     try(
-      retcor_failed <- xcms::retcor(
+      retcor_failed <- xcms::adjustRtime(
         xset, 
-        method   = "loess", 
-        plottype = parameters$plottype[exp_index], 
-        family   = parameters$family[exp_index],
-        missing  = parameters$missing[exp_index], 
-        extra    = parameters$extra[exp_index], 
-        span     = parameters$span[exp_index])
+        param = xcms::PeakGroupsParam(
+          minFraction = parameters$minfrac[exp_index],
+          extraPeaks  = parameters$extra[exp_index],
+          smooth      = parameters$smooth[exp_index],
+          family      = parameters$family[exp_index],
+          span        = parameters$span[exp_index])
+        )
       )  		  
     
     if(!is.numeric(retcor_failed)) {
@@ -499,18 +510,19 @@ retcorGroup <- function(xset, parameters, exp_index=1) {
   if(parameters$retcorMethod[exp_index] == "obiwarp") {
     try(
       retcor_failed <- 
-        xcms::retcor(xset, 
-               method         = "obiwarp", 
-               plottype       = parameters$plottype[exp_index], 
-               distFunc       = parameters$distFunc[exp_index],
-               profStep       = parameters$profStep[exp_index], 
-               center         = parameters$center[exp_index], 
-               response       = parameters$response[exp_index], 
-               gapInit        = parameters$gapInit[exp_index], 
-               gapExtend      = parameters$gapExtend[exp_index],
-               factorDiag     = parameters$factorDiag[exp_index],
-               factorGap      = parameters$factorGap[exp_index], 
-               localAlignment = parameters$localAlignment[exp_index])
+        xcms::adjustRtime(
+          xset, 
+          param = xcms::ObiwarpParam(
+            distFun        = parameters$distFunc[exp_index],
+            binSize        = parameters$profStep[exp_index], 
+            centerSample   = parameters$center[exp_index], 
+            response       = parameters$response[exp_index], 
+            gapInit        = parameters$gapInit[exp_index], 
+            gapExtend      = parameters$gapExtend[exp_index],
+            factorDiag     = parameters$factorDiag[exp_index],
+            factorGap      = parameters$factorGap[exp_index], 
+            localAlignment = as.logical(parameters$localAlignment[exp_index]))
+          )
       )  	
     
     if(!is.numeric(retcor_failed)) {
@@ -520,14 +532,16 @@ retcorGroup <- function(xset, parameters, exp_index=1) {
   } 
   
   try(
-    xset <- xcms::group(
+    xset <- xcms::groupChromPeaks(
       xset, 
-      method  = "density", 
-      bw      = parameters$bw[exp_index], 
-      mzwid   = parameters$mzwid[exp_index], 
-      minfrac = parameters$minfrac[exp_index], 
-      minsamp = parameters$minsamp[exp_index], 
-      max     = parameters$max[exp_index])
+      param = xcms::PeakDensityParam(
+        sampleGroups = sample_groups,
+        bw          = parameters$bw[exp_index],
+        binSize     = parameters$mzwid[exp_index],
+        minFraction = parameters$minfrac[exp_index],
+        minSamples  = parameters$minsamp[exp_index],
+        maxFeatures = parameters$max[exp_index])
+      )
     )
   
   

@@ -8,14 +8,14 @@ Author: Gunnar Libiseller <Gunnar.Libiseller@joanneum.at>,
         Thomas Lieb <thomas.r.lieb@gmail.com>
 Maintainer: Thomas Lieb <thomas.r.lieb@gmail.com>
 Depends:
-  xcms (>= 1.50.0), 
+  xcms (>= 4.0.0), 
   rsm, 
   CAMERA, 
   grDevices, 
   graphics, 
   stats, 
   utils
-Imports: BiocParallel
+Imports: BiocParallel, MsExperiment, MSnbase, methods
 Suggests: RUnit, BiocGenerics, msdata, mtbls2, faahKO, knitr
 Enhances: parallel
 VignetteBuilder: knitr
