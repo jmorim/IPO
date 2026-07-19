@@ -1,10 +1,10 @@
 \name{calculateXcmsSet}
 \alias{calculateXcmsSet}
 \title{
-Calculation of an xcmsSet-Object
+Calculation of an XcmsExperiment-Object
 }
 \description{
-	This function encapsulates xcms::findPeaks-methods for IPO
+	This function encapsulates xcms::findChromPeaks-methods for IPO
 }
 \usage{
 calculateXcmsSet(files, xcmsSetParameters, scanrange=NULL, task=1, 
@@ -14,25 +14,30 @@ calculateXcmsSet(files, xcmsSetParameters, scanrange=NULL, task=1,
 \arguments{
   \item{files}{a vector containing the files for peak picking}
   \item{xcmsSetParameters}{
-    a list with all parameters for \code{\link[xcms]{xcmsSet}}-methods as list-items}
+    a list with all parameters for \code{\link[xcms]{CentWaveParam}}/
+    \code{\link[xcms]{MatchedFilterParam}} as list-items}
   \item{scanrange}{
-     scan range to process. See \code{\link[xcms]{findPeaks.centWave}}.}
+     scan range to process.}
   \item{task}{
     The task-id when using this method in parallel calculations.}
   \item{BPPARAM}{a \code{BiocParallel} parameter object to control how
-    and if parallel processing of \code{\link[xcms]{xcmsSet}} should be performed. 
+    and if parallel processing of \code{\link[xcms]{findChromPeaks}} should be performed. 
     Such objects can be created by the \code{\link[BiocParallel]{SerialParam}},
     \code{\link[BiocParallel]{MulticoreParam}} or
     \code{\link[BiocParallel]{SnowParam}} functions.
   }
   \item{nSlaves}{
-    \code{\link[xcms]{xcmsSet}}'s \code{nSlaves}-argument is deprecated., use \code{BPPARAM} argument instead.}
+    Deprecated, use \code{BPPARAM} argument instead.}
 }
 \details{
-  Encapsulation of xcms::findPeaks-methods used in IPO.
+  Encapsulation of xcms::findChromPeaks-methods used in IPO. Raw data are
+  read into an \code{MsExperiment} object (via
+  \code{\link[MsExperiment]{readMsExperiment}}) and peak picking is
+  performed with \code{\link[xcms]{findChromPeaks}}, returning an
+  \code{XcmsExperiment} object.
 }
 \value{
-	An xcmsSet-object
+	An XcmsExperiment-object
 }
 \references{
 
@@ -50,7 +55,7 @@ calculateXcmsSet(files, xcmsSetParameters, scanrange=NULL, task=1,
 	Thomas Riebenbauer (\email{thomas.riebenbauer@joanneum.at})
 }
 \seealso{
-\code{\link[xcms]{findPeaks}}
+\code{\link[xcms]{findChromPeaks}}
 }
 \examples{
 

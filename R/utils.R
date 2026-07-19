@@ -330,14 +330,93 @@ expand.grid.subset  <- function(subset, sequence, dimensions) {
 
 
 peaks_IPO <- function(xset) {
-  # peaks function, to work with older xcms-version (<2.99.7)
-  # sample column is missing, if first the first sample processed has no peaks
-  # see https://github.com/sneumann/xcms/issues/220
-  peaks_act <- xcms::peaks(xset)
-  if (!("sample" %in% colnames(peaks_act))) {
-    colnames(peaks_act)[colnames(peaks_act) == ""] <- "sample"
+  if (inherits(xset, "xcmsSet")) {
+    # peaks function, to work with older xcms-version (<2.99.7)
+    # sample column is missing, if first the first sample processed has no peaks
+    # see https://github.com/sneumann/xcms/issues/220
+    peaks_act <- xcms::peaks(xset)
+    if (!("sample" %in% colnames(peaks_act))) {
+      colnames(peaks_act)[colnames(peaks_act) == ""] <- "sample"
+    }
+    return(peaks_act)
   }
-  peaks_act
+
+  # XcmsExperiment/XCMSnExp (xcms >= 3): the 'sample' column is always
+  # present in chromPeaks()
+  xcms::chromPeaks(xset)
+}
+
+
+#' Return the raw data file paths for either a legacy \code{xcmsSet} or a
+#' modern \code{XcmsExperiment}/\code{XCMSnExp} object.
+fileNames_IPO <- function(xset) {
+  if (inherits(xset, "xcmsSet")) {
+    return(xcms::filepaths(xset))
+  }
+  MSnbase::fileNames(xset)
+}
+
+
+#' Return the correspondence (feature grouping) result for either a legacy
+#' \code{xcmsSet} or a modern \code{XcmsExperiment}/\code{XCMSnExp} object,
+#' as a matrix/data.frame with (at least) an \code{rtmed} column.
+groups_IPO <- function(xset) {
+  if (inherits(xset, "xcmsSet")) {
+    return(xcms::groups(xset))
+  }
+  as.data.frame(xcms::featureDefinitions(xset))
+}
+
+
+#' Return, for each feature/group, the row indices into \code{peaks_IPO(xset)}
+#' of the chromatographic peaks assigned to it.
+groupidx_IPO <- function(xset) {
+  if (inherits(xset, "xcmsSet")) {
+    return(xcms::groupidx(xset))
+  }
+  xcms::featureDefinitions(xset)$peakidx
+}
+
+
+
+
+#' Build a minimal legacy \code{xcmsSet} object from an
+#' \code{XcmsExperiment}/\code{XCMSnExp}, so that CAMERA (which has not been
+#' updated to support the new xcms data structures) can still be used for
+#' isotope annotation via \code{\link[CAMERA]{xsAnnotate}}.
+asLegacyXcmsSet_IPO <- function(xset) {
+  if (inherits(xset, "xcmsSet")) {
+    return(xset)
+  }
+
+  pks <- peaks_IPO(xset)
+  fp <- fileNames_IPO(xset)
+
+  methods::new(
+    "xcmsSet",
+    peaks = pks,
+    filepaths = fp,
+    phenoData = data.frame(
+      class = rep("sample", length(fp)),
+      row.names = basename(fp)
+    )
+  )
+}
+
+
+#' Restrict the spectra of an \code{MsExperiment}/\code{XcmsExperiment} to a
+#' scan index range, mirroring the \code{scanrange} argument previously
+#' supported by \code{xcms::xcmsSet()}.
+filterScanrange_IPO <- function(raw_data, scanrange) {
+  if (is.null(scanrange)) {
+    return(raw_data)
+  }
+
+  sps <- MsExperiment::spectra(raw_data)
+  idx <- seq_along(sps)
+  keep <- idx >= scanrange[1] & idx <= scanrange[2]
+  MsExperiment::spectra(raw_data) <- sps[keep]
+  raw_data
 }
 
 plotContours <- function(model, maximum_slice, plot_name = NULL) {
@@ -422,102 +501,113 @@ writeRScript <- function(peakPickingSettings, retCorGroupSettings, nSlaves = 0) 
   }
   
   message("library(xcms)")
-  message("library(Rmpi)\n")
+  message("library(MsExperiment)")
+  message("library(BiocParallel)\n")
+
+  message("raw_data <- readMsExperiment(spectraFiles = files)\n")
 
   if(is.null(peakPickingSettings$step)) {     #centWave     		
-    message(paste("xset <- xcmsSet(",
-                  " \n  method = \"centWave\"", 
-                  ",\n  peakwidth       = c(", 
+    message(paste("xset <- findChromPeaks(",
+                  " \n  raw_data", 
+                  ",\n  param = CentWaveParam(",
+                  "\n    peakwidth       = c(", 
                     peakPickingSettings$min_peakwidth, ", ", 
                     peakPickingSettings$max_peakwidth, ")", 
-                  ",\n  ppm             = ", peakPickingSettings$ppm, 
-                  ",\n  noise           = ", peakPickingSettings$noise, 
-                  ",\n  snthresh        = ", peakPickingSettings$snthresh, 
-                  ",\n  mzdiff          = ", peakPickingSettings$mzdiff,
-                  ",\n  prefilter       = c(", 
+                  ",\n    ppm             = ", peakPickingSettings$ppm, 
+                  ",\n    noise           = ", peakPickingSettings$noise, 
+                  ",\n    snthresh        = ", peakPickingSettings$snthresh, 
+                  ",\n    mzdiff          = ", peakPickingSettings$mzdiff,
+                  ",\n    prefilter       = c(", 
                     peakPickingSettings$prefilter, ", ", 
                     peakPickingSettings$value_of_prefilter,	")", 
-                  ",\n  mzCenterFun     = \"", 
+                  ",\n    mzCenterFun     = \"", 
                     peakPickingSettings$mzCenterFun, "\"", 
-                  ",\n  integrate       = ", peakPickingSettings$integrate,
-                  ",\n  fitgauss        = ", peakPickingSettings$fitgauss,
-                  ",\n  verbose.columns = ", 
+                  ",\n    integrate       = ", peakPickingSettings$integrate,
+                  ",\n    fitgauss        = ", peakPickingSettings$fitgauss,
+                  ",\n    verboseColumns  = ", 
                     peakPickingSettings$verbose.columns,
-                  #", nSlaves = ", nSlaves, ")", 
+                  "\n  )",
                   ")",
                   sep = ""))
                   
   } else { #matchedFilter  
-    message(paste("xset <- xcmsSet(",
-                  " \n  method   = \"matchedFilter\"", 
-                  ",\n  fwhm     = ", peakPickingSettings$fwhm, 
-                  ",\n  snthresh = ",peakPickingSettings$snthresh,
-                  ",\n  step     = ", peakPickingSettings$step, 
-                  ",\n  steps    = ", round(peakPickingSettings$steps),
-                  ",\n  sigma    = ", peakPickingSettings$sigma, 
-                  ",\n  max      = ", round(peakPickingSettings$max), 
-                  ",\n  mzdiff   = ", peakPickingSettings$mzdiff,
-                  ",\n  index    = ", peakPickingSettings$index,
-                  #", nSlaves = ", nSlaves, ")", 
+    message(paste("xset <- findChromPeaks(",
+                  " \n  raw_data", 
+                  ",\n  param = MatchedFilterParam(",
+                  "\n    fwhm     = ", peakPickingSettings$fwhm, 
+                  ",\n    snthresh = ",peakPickingSettings$snthresh,
+                  ",\n    binSize  = ", peakPickingSettings$step, 
+                  ",\n    steps    = ", round(peakPickingSettings$steps),
+                  ",\n    sigma    = ", peakPickingSettings$sigma, 
+                  ",\n    max      = ", round(peakPickingSettings$max), 
+                  ",\n    mzdiff   = ", peakPickingSettings$mzdiff,
+                  ",\n    index    = ", peakPickingSettings$index,
+                  "\n  )",
                   ")",
                   sep = ""))   
   }
 	  
   if(retCorGroupSettings$retcorMethod == "loess")	{
     
-    message(paste("xset <- group(",
+    message(paste("xset <- groupChromPeaks(",
                   " \n  xset",
-                  ",\n  method  = \"density\"", 
-                  ",\n  bw      = ", retCorGroupSettings$bw, 
-                  ",\n  mzwid   = ", retCorGroupSettings$mzwid, 
-                  ",\n  minfrac = ", retCorGroupSettings$minfrac,
-                  ",\n  minsamp = ", round(retCorGroupSettings$minsamp), 
-                  ",\n  max     = ", round(retCorGroupSettings$max), 
+                  ",\n  param = PeakDensityParam(",
+                  "\n    sampleGroups = rep(1, length(fileNames(xset)))",
+                  ",\n    bw          = ", retCorGroupSettings$bw, 
+                  ",\n    binSize     = ", retCorGroupSettings$mzwid, 
+                  ",\n    minFraction = ", retCorGroupSettings$minfrac,
+                  ",\n    minSamples  = ", round(retCorGroupSettings$minsamp), 
+                  ",\n    maxFeatures = ", round(retCorGroupSettings$max), 
+                  "\n  )",
                   ")", 
                   sep = ""))	 
     
-    message(paste("xset <- retcor(",
+    message(paste("xset <- adjustRtime(",
                   " \n  xset", 
-                  ",\n  missing  = ", round(retCorGroupSettings$missing), 
-                  ",\n  extra    = ", round(retCorGroupSettings$extra),
-                  ",\n  span     = ", retCorGroupSettings$span, 
-                  ",\n  smooth   = \"", retCorGroupSettings$smooth, "\"", 
-                  ",\n  family   = \"", retCorGroupSettings$family, "\"", 
-                  ",\n  plottype = \"", retCorGroupSettings$plottype, "\")", 
+                  ",\n  param = PeakGroupsParam(",
+                  "\n    minFraction = ", retCorGroupSettings$minfrac,
+                  ",\n    extraPeaks  = ", round(retCorGroupSettings$extra),
+                  ",\n    span        = ", retCorGroupSettings$span, 
+                  ",\n    smooth      = \"", retCorGroupSettings$smooth, "\"", 
+                  ",\n    family      = \"", retCorGroupSettings$family, "\"", 
+                  "\n  )",
+                  ")", 
                   sep = ""))	 
   }  
   
   if(retCorGroupSettings$retcorMethod == "obiwarp") {
-    message(paste("xset <- retcor(",
+    message(paste("xset <- adjustRtime(",
                   " \n  xset",
-                  ",\n  method         = \"obiwarp\"",
-                  ",\n  plottype       = \"", 
-                    retCorGroupSettings$plottype, "\"", 
-                  ",\n  distFunc       = \"", 
+                  ",\n  param = ObiwarpParam(",
+                  "\n    distFun        = \"", 
                     retCorGroupSettings$distFunc, "\"", 
-                  ",\n  profStep       = ", retCorGroupSettings$profStep, 
-                  ",\n  center         = ", retCorGroupSettings$center, 
-                  ",\n  response       = ", retCorGroupSettings$response,
-                  ",\n  gapInit        = ", retCorGroupSettings$gapInit,
-                  ",\n  gapExtend      = ", retCorGroupSettings$gapExtend,
-                  ",\n  factorDiag     = ", retCorGroupSettings$factorDiag, 
-                  ",\n  factorGap      = ", retCorGroupSettings$factorGap, 
-                  ",\n  localAlignment = ", retCorGroupSettings$localAlignment, 
+                  ",\n    binSize        = ", retCorGroupSettings$profStep, 
+                  ",\n    centerSample   = ", retCorGroupSettings$center, 
+                  ",\n    response       = ", retCorGroupSettings$response,
+                  ",\n    gapInit        = ", retCorGroupSettings$gapInit,
+                  ",\n    gapExtend      = ", retCorGroupSettings$gapExtend,
+                  ",\n    factorDiag     = ", retCorGroupSettings$factorDiag, 
+                  ",\n    factorGap      = ", retCorGroupSettings$factorGap, 
+                  ",\n    localAlignment = ", retCorGroupSettings$localAlignment, 
+                  "\n  )",
                   ")", 
                   sep = ""))
   }
   	   
-  message(paste("xset <- group(",
+  message(paste("xset <- groupChromPeaks(",
                 " \n  xset",
-                ",\n  method  = \"density\"", 
-                ",\n  bw      = ", retCorGroupSettings$bw, 
-                ",\n  mzwid   = ", retCorGroupSettings$mzwid,
-                ",\n  minfrac = ", retCorGroupSettings$minfrac, 
-                ",\n  minsamp = ", retCorGroupSettings$minsamp,
-                ",\n  max     = ", retCorGroupSettings$max, ")\n", 
+                ",\n  param = PeakDensityParam(",
+                "\n    sampleGroups = rep(1, length(fileNames(xset)))",
+                ",\n    bw          = ", retCorGroupSettings$bw, 
+                ",\n    binSize     = ", retCorGroupSettings$mzwid,
+                ",\n    minFraction = ", retCorGroupSettings$minfrac, 
+                ",\n    minSamples  = ", retCorGroupSettings$minsamp,
+                ",\n    maxFeatures = ", retCorGroupSettings$max, 
+                "\n  )\n", 
+                ")", 
                 sep = ""))	 
 	  
-  message(paste("xset <- fillPeaks(xset)", sep = ""))	
+  message(paste("xset <- fillChromPeaks(xset)", sep = ""))	
 	
 }
 

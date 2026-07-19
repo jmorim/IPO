@@ -104,7 +104,7 @@ findIsotopes.IPO <-
       speaks <- peak_source[peak_source[,"sample"]==sample,,drop=FALSE]
       split <- 250
 	  if(!(checkPeakShape=="none"))
-        rawdata <- loadRaw(xcmsSource(filepaths(xset)[sample]))
+        rawdata <- loadRaw(xcmsSource(fileNames_IPO(xset)[sample]))
       
       if(nrow(speaks)>1) {  		      
         #speaks <- speaks[,-c("sample")]
@@ -337,10 +337,13 @@ findIsotopes.CAMERA <-
     ids <- peaks_IPO(xset)[,"sample", drop=FALSE]
     ids <- cbind(1:length(ids), ids)
     
-    xsets <- split(xset, unique(peaks_IPO(xset)[,"sample"]))
+    # CAMERA::xsAnnotate() only supports legacy 'xcmsSet' objects; build a
+    # minimal compatible shim from the XcmsExperiment/XCMSnExp peak table so
+    # CAMERA-based isotope annotation keeps working with the new xcms API.
+    xcmsSetShim <- asLegacyXcmsSet_IPO(xset)
     samples <- unique(peaks_IPO(xset)[,"sample"])
     for(sample in samples) {
-      an <- xsAnnotate(xset, sample=sample)
+      an <- xsAnnotate(xcmsSetShim, sample=sample)
       isos <- findIsotopes(an, ...)@isoID[,c("mpeak", "isopeak"), drop=FALSE]
       #start_id <- ids[ids[,2]==sample,,drop=FALSE][1,1] - 1
       iso_mat <- rbind(iso_mat, matrix(ids[ids[,2]==sample,1][isos], ncol=2))
@@ -380,50 +383,47 @@ calculateXcmsSet <- function(files,
   
   if (is.null(xcmsSetParameters$step)) {
     # centWave
-    xset <-
-      xcms::xcmsSet(
-        files = files,
-        method = "centWave",
-        peakwidth = c(xcmsSetParameters$min_peakwidth[task],
-                      xcmsSetParameters$max_peakwidth[task]),
-        ppm         = xcmsSetParameters$ppm[task],
-        noise       = xcmsSetParameters$noise[task],
-        snthresh    = xcmsSetParameters$snthresh[task],
-        mzdiff      = xcmsSetParameters$mzdiff[task],
-        prefilter   = c(
-          xcmsSetParameters$prefilter[task],
-          xcmsSetParameters$value_of_prefilter[task]
-        ),
-        mzCenterFun = xcmsSetParameters$mzCenterFun[task],
-        integrate   = xcmsSetParameters$integrate[task],
-        fitgauss    = xcmsSetParameters$fitgauss[task],
-        verbose.columns =
-          xcmsSetParameters$verbose.columns[task],
-        BPPARAM = BPPARAM,
-        scanrange   = scanrange#,
-        #nSlaves     = nSlaves * xcmsSetParameters$nSlaves[task]
-      )
+    raw_data <- MsExperiment::readMsExperiment(spectraFiles = files)
+    raw_data <- filterScanrange_IPO(raw_data, scanrange)
+    
+    cwp <- xcms::CentWaveParam(
+      ppm             = xcmsSetParameters$ppm[task],
+      peakwidth       = c(xcmsSetParameters$min_peakwidth[task],
+                          xcmsSetParameters$max_peakwidth[task]),
+      snthresh        = xcmsSetParameters$snthresh[task],
+      prefilter       = c(
+        xcmsSetParameters$prefilter[task],
+        xcmsSetParameters$value_of_prefilter[task]
+      ),
+      mzCenterFun     = xcmsSetParameters$mzCenterFun[task],
+      integrate       = xcmsSetParameters$integrate[task],
+      mzdiff          = xcmsSetParameters$mzdiff[task],
+      fitgauss        = xcmsSetParameters$fitgauss[task],
+      noise           = xcmsSetParameters$noise[task],
+      verboseColumns  = xcmsSetParameters$verbose.columns[task]
+    )
+    
+    xset <- xcms::findChromPeaks(raw_data, param = cwp, BPPARAM = BPPARAM)
     
   } else {
     #matchedFilter
     try({
       suppressMessages({
-        xset <-
-          xcms::xcmsSet(
-            files     = files,
-            method    = "matchedFilter",
-            fwhm      = xcmsSetParameters$fwhm[task],
-            snthresh  = xcmsSetParameters$snthresh[task],
-            step      = xcmsSetParameters$step[task],
-            steps     = xcmsSetParameters$steps[task],
-            sigma     = xcmsSetParameters$sigma[task],
-            max       = xcmsSetParameters$max[task],
-            mzdiff    = xcmsSetParameters$mzdiff[task],
-            index     = xcmsSetParameters$index[task],
-            BPPARAM   = BPPARAM,
-            scanrange = scanrange#,
-            #nSlaves   = nSlaves * xcmsSetParameters$nSlaves[task]
-          )
+        raw_data <- MsExperiment::readMsExperiment(spectraFiles = files)
+        raw_data <- filterScanrange_IPO(raw_data, scanrange)
+        
+        mfp <- xcms::MatchedFilterParam(
+          binSize   = xcmsSetParameters$step[task],
+          fwhm      = xcmsSetParameters$fwhm[task],
+          snthresh  = xcmsSetParameters$snthresh[task],
+          steps     = xcmsSetParameters$steps[task],
+          sigma     = xcmsSetParameters$sigma[task],
+          max       = xcmsSetParameters$max[task],
+          mzdiff    = xcmsSetParameters$mzdiff[task],
+          index     = xcmsSetParameters$index[task]
+        )
+        
+        xset <- xcms::findChromPeaks(raw_data, param = mfp, BPPARAM = BPPARAM)
       })
     })
   }
