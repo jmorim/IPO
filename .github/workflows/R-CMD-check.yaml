@@ -25,7 +25,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libnetcdf-dev libcurl4-openssl-dev libssl-dev libxml2-dev
+          sudo apt-get install -y libnetcdf-dev libcurl4-openssl-dev libssl-dev libxml2-dev libglpk-dev libgmp-dev
 
       - name: Install BiocManager
         run: install.packages("BiocManager")
